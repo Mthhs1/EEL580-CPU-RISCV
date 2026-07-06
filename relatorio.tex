@@ -1,0 +1,154 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+\title{Relatorio Tecnico \\ CPU RISC-V RV32I em Verilog}
+\author{Projeto EEL580 -- Arquitetura de Computadores}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Introducao}
+
+Este projeto descreve a implementacao de uma CPU RISC-V de 32 bits (RV32I) com
+pipeline de 5 estagios, utilizando Verilog para integracao no simulador Digital,
+atendendo aos requisitos do documento \texttt{Projeto\_CPU\_p1.pdf}.
+
+\section{Premissas Adotadas}
+
+\begin{itemize}
+    \item O subconjunto de instrucoes RV32I exigido pelo PDF foi implementado:
+          \texttt{add}, \texttt{addi}, \texttt{auipc}, \texttt{sub},
+          \texttt{and}, \texttt{andi}, \texttt{or}, \texttt{ori},
+          \texttt{xor}, \texttt{xori}, \texttt{sll}, \texttt{slli},
+          \texttt{srl}, \texttt{srli}, \texttt{lw}, \texttt{lui},
+          \texttt{sw}, \texttt{jal}, \texttt{jalr}, \texttt{beq}, \texttt{bne}.
+    \item As memorias de instrucao e dados sao externas a CPU, expostas via
+          interfaces separadas (\texttt{imem\_*} e \texttt{dmem\_*}),
+          permitindo o uso das memorias ROM e RAM do Digital.
+    \item O sinal \texttt{load\_enable\_i} congela toda a CPU durante a carga
+          assincrona das memorias, preservando o estado interno.
+    \item O reset e assincrono (\texttt{reset\_i}), zerando PC, pipeline e
+          banco de registradores.
+    \item Nao ha modo supervisor (S Mode); apenas o pipeline de inteiros.
+    \item A ALU foi implementada em Verilog, sem uso de blocos combinacionais
+          multi-bit do Digital, conforme recomendado.
+\end{itemize}
+
+\section{Arquitetura do Pipeline}
+
+A CPU foi organizada em 5 estagios: IF, ID, EX, MEM e WB.
+
+\subsection{IF (Instruction Fetch)}
+O \texttt{program\_counter} mantem o PC atual e calcula PC+4. O endereco da
+instrucao e apresentado em \texttt{imem\_addr\_o} e a instrucao e lida de
+\texttt{imem\_data\_i}. Em caso de branch tomado ou jump, o PC e redirecionado
+para \texttt{target\_addr\_i}.
+
+\subsection{ID (Instruction Decode)}
+O \texttt{instruction\_decoder} extrai opcode, rd, rs1, rs2, funct3, funct7 e
+gera o imediato sign-extended para os formatos R, I, S, B, U e J. A
+\texttt{control\_unit} decodifica o opcode e gera os sinais de controle. O
+\texttt{register\_file} realiza leitura assincrona de rs1 e rs2, com x0 sempre
+retornando zero. Um mux de internal forwarding WB$\rightarrow$ID seleciona o
+dado do WB quando ha conflito write-before-read.
+
+\subsection{EX (Execute)}
+A \texttt{forwarding\_unit} seleciona a origem dos operandos A e B da ALU:
+valor do banco (00), forward do MEM (01) ou forward do WB (10). Para
+\texttt{auipc}, a entrada A recebe o PC; para \texttt{lui}, recebe zero. A
+\texttt{alu} executa ADD, SUB, AND, OR, XOR, SLL, SRL e PASS\_B. O
+\texttt{branch\_comparator} compara rs1 e rs2 para \texttt{beq} e
+\texttt{bne}. O endereco de destino e calculado como PC+imm (branches/JAL)
+ou rs1+imm (JALR, com bit 0 = 0).
+
+\subsection{MEM (Memory Access)}
+O endereco de memoria de dados e o resultado da ALU. Para \texttt{sw}, o dado
+de rs2 e escrito. Para \texttt{lw}, o dado e lido. A escrita e suprimida quando
+\texttt{load\_enable\_i} esta ativo.
+
+\subsection{WB (Write Back)}
+Para \texttt{jal}/\texttt{jalr}, o valor escrito e PC+4 (endereco de retorno).
+Para \texttt{lw}, o dado lido da memoria. Para demais instrucoes, o resultado
+da ALU.
+
+\section{Tratamento de Hazards}
+
+\subsection{Data Hazards (RAW)}
+\textbf{Forwarding EX/MEM e EX/WB}: A \texttt{forwarding\_unit} detecta
+dependencias entre a instrucao no EX e as instrucoes em MEM/WB. Se houver
+dependencia, o operando e encaminhado diretamente, evitando stall.
+
+\textbf{Internal forwarding WB$\rightarrow$ID}: Quando uma instrucao no WB
+escreve em um registrador que uma instrucao no ID esta lendo no mesmo ciclo,
+a escrita sincrona do banco ainda nao ocorreu. Um mux combinacional seleciona
+o dado do WB diretamente para o ID/EX register.
+
+\subsection{Load-Use Hazard}
+Quando um load esta no EX e a instrucao no ID depende do resultado, a
+\texttt{hazard\_unit} gera stall no IF/ID e flush no ID/EX, inserindo uma
+bolha no pipeline.
+
+\subsection{Control Hazards}
+Branches sao resolvidos no EX. Quando um branch e tomado ou um jump e
+executado, flush e aplicado no IF/ID e ID/EX, e o PC e redirecionado.
+
+\section{Sinais de Debug}
+
+\begin{tabularx}{\textwidth}{|l|c|X|}
+\hline
+\textbf{Sinal} & \textbf{Bits} & \textbf{Descricao} \\
+\hline
+\texttt{pc\_debug\_o} & 32 & PC atual (estagio IF) \\
+\texttt{instr\_debug\_o} & 32 & Instrucao atual (estagio ID) \\
+\texttt{alu\_result\_debug\_o} & 32 & Resultado da ALU (estagio EX) \\
+\texttt{alu\_carry\_debug\_o} & 1 & Carry da ALU (debug do somador) \\
+\texttt{alu\_overflow\_debug\_o} & 1 & Overflow da ALU (debug do somador) \\
+\texttt{reg\_debug\_o} & 32 & Valor do registrador selecionado por \texttt{reg\_sel\_i} \\
+\texttt{stage\_if\_pc\_o} & 32 & PC no estagio IF \\
+\texttt{stage\_id\_pc\_o} & 32 & PC no estagio ID \\
+\texttt{stage\_ex\_pc\_o} & 32 & PC no estagio EX \\
+\texttt{hazard\_stall\_o} & 1 & Indicador de stall ativo \\
+\texttt{hazard\_flush\_o} & 1 & Indicador de flush ativo \\
+\hline
+\end{tabularx}
+
+\section{Validacao}
+
+\subsection{Testbench Automatizado}
+O arquivo \texttt{tb\_riscv\_cpu.v} implementa um testbench com iverilog que
+carrega um programa de 49 instrucoes cobrindo todas as instrucoes exigidas,
+executa 70 ciclos e verifica 31 registradores e 2 posicoes de memoria.
+
+\subsection{Simulacao no Digital}
+O arquivo \texttt{test\_circuit.dig} contem um circuito pronto para o simulador
+Digital, com ROM pre-carregada, RAM dual-port, Clock e probes de debug.
+Para executar: abrir o arquivo, com \texttt{Reset=1} clicar no Clock uma vez,
+mudar \texttt{Reset=0}, e clicar no Clock repetidamente observando os probes.
+
+\subsection{Resultados}
+Todos os 32 testes passaram, cobrindo: aritmetica, logica, deslocamento,
+memoria, controle (branch/jump), forwarding e load-use hazard.
+
+\subsection{Como Reproduzir}
+\begin{lstlisting}[language=bash]
+iverilog -g2012 -s tb_riscv_cpu -o tb.out \
+  tb_riscv_cpu.v alu.v branch_comparator.v \
+  control_unit.v forwarding_unit.v hazard_unit.v \
+  instruction_decoder.v pipeline_regs.v \
+  program_counter.v register_file.v riscv_cpu.v
+vvp tb.out
+\end{lstlisting}
+
+
+\end{document}
