@@ -134,7 +134,8 @@ executa 70 ciclos e verifica 31 registradores e 2 posicoes de memoria.
 O arquivo \texttt{test\_circuit.dig} contem um circuito pronto para o simulador
 Digital, com ROM pre-carregada, RAM dual-port, Clock e probes de debug.
 Para executar: abrir o arquivo, com \texttt{Reset=1} clicar no Clock uma vez,
-mudar \texttt{Reset=0}, e clicar no Clock repetidamente observando os probes.
+mudar \texttt{Reset=0}, e clicar no Clock repetidamente observando os probes. Caso falha,
+clicar no componente da CPU e alterar o caminho do arquivo \texttt{riscv\_cpu\_all.v} para o local correto.
 
 \subsection{Resultados}
 Todos os 32 testes passaram, cobrindo: aritmetica, logica, deslocamento,
