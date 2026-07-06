@@ -24,6 +24,7 @@ Abra o arquivo `test_circuit.dig` no simulador Digital. O circuito ja contem:
 - Clock
 - Pinos de entrada: `Reset`, `load_enable`, `reg_sel`
 - Probes de saida: `PC_Debug`, `Instr_Debug`, `ALU_Result`, `Reg_Debug`, `Stage_IF/ID/EX_PC`, `Hazard_Stall`, `Hazard_Flush`
+- Caso não funcione, abra o arquivo, clique no componente da CPU e altere o caminho do arquivo `riscv_cpu_all.v` para o local correto.
 
 ### Passo 2: Configurar entradas
 
